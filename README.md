@@ -4,6 +4,8 @@ Based on https://github.com/cyrilpawelko/m5panel
 
 Displays weather from openweathermap.org.
 
+![Example display](doc/m5panel.jpg)
+
 ## Configuration
 
 See https://github.com/cyrilpawelko/m5panel 
