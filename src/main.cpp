@@ -9,6 +9,7 @@
 #include <regex>
 #include "M5PanelWidget.h"
 #include "defs.h"
+#include <esp_sleep.h>
 
 #define ERR_WIFI_NOT_CONNECTED "ERROR: Wifi not connected"
 #define ERR_HTTP_ERROR "ERROR: HTTP code "
@@ -26,7 +27,7 @@ HTTPClient httpClient;
 int loopIndex = 0;
 unsigned long upTime;
 
-DynamicJsonDocument jsonDoc(30000);
+DynamicJsonDocument json(30000);
 
 int previousSysInfoMillis = 0;
 int currentSysInfoMillis;
@@ -92,6 +93,8 @@ void setTimeZone() // Gets timezone from OpenHAB
     openhabTZ.setLocation(timezone);
 }
 
+String msg("---");
+
 void displaySysInfo()
 {
     // Display system information
@@ -102,6 +105,8 @@ void displaySysInfo()
 
     canvas.setTextSize(FONT_SIZE_LABEL);
     canvas.setTextDatum(TL_DATUM);
+
+    canvas.drawString(msg + "      ", 0, 190);
 
     canvas.drawString("Free Heap:", 0, 250);
     canvas.drawString(String(ESP.getFreeHeap()) + " B", 0, 290);
@@ -209,7 +214,6 @@ void updateSiteMap(int widget)
     String url = WEATHER_URL;
     String response;
     bool success = fetch(url, response);
-    DynamicJsonDocument json(50000);
     deserializeJson(json, response);
     debug(F("updateSiteMap"), "fetch API:" + String(success ? 1 : 0) + ", size " + String(response.length()));
 
@@ -223,15 +227,15 @@ void updateSiteMap(int widget)
 
     Serial.println("Item type=" + type + " itemName=" + itemName + " itemType=" + itemType + " itemState=" + itemState);
     int index = 0;
-    widgets[index++].update("Home", buf, itemState, "blinds", type, itemName, itemType);
+    widgets[index++].update("Home", buf, itemState, "" /*"blinds"*/, type, itemName, itemType);
 
     float hum = M5.SHT30.GetRelHumidity();
-    snprintf(buf, 63, "%0.2f%%", hum);
-    widgets[index++].update("Humidity", buf, itemState, "humidity", type, itemName, itemType);
+    snprintf(buf, 63, "%1.0f%%", hum);
+    widgets[index++].update("Humidity", buf, itemState, "" /*"humidity"*/, type, itemName, itemType);
 
     float nowTemp = json["current"]["temp"].as<float>();
     snprintf(buf, 63, "%2.0f *C", nowTemp);
-    widgets[index++].update("Now", buf, itemState, "temperature", type, itemName, itemType);
+    widgets[index++].update("Now", buf, itemState, "" /*"temperature"*/, type, itemName, itemType);
 
     tmElements_t tm;
     JsonArray hourly = json["hourly"].as<JsonArray>();
@@ -249,7 +253,7 @@ void updateSiteMap(int widget)
         long time = openhabTZ.tzTime(hour["dt"], UTC_TIME);
         breakTime(time, tm);
         int hr = tm.Hour;
-        Serial.printf("%i %i:%i\n", i, hr, tm.Minute);
+        // Serial.printf("%i %i:%i\n", i, hr, tm.Minute);
 
         if (hr >= 7 && hr < 11 && next < max && !haveMorning)
         {
@@ -283,50 +287,50 @@ void updateSiteMap(int widget)
 
     float morningTemp = json["hourly"][indexes[0]]["temp"].as<float>();
     snprintf(buf, 63, "%2.0f *C", morningTemp);
-    widgets[index++].update(names[0], buf, itemState, "climate", type, itemName, itemType);
+    widgets[index++].update(names[0], buf, itemState, "" /*"climate"*/, type, itemName, itemType);
 
     float dayTemp = json["hourly"][indexes[1]]["temp"].as<float>();
     snprintf(buf, 63, "%2.0f *C", dayTemp);
-    widgets[index++].update(names[1], buf, itemState, "climate", type, itemName, itemType);
+    widgets[index++].update(names[1], buf, itemState, "" /*"climate"*/, type, itemName, itemType);
 
     float eveningTemp = json["hourly"][indexes[2]]["temp"].as<float>();
     snprintf(buf, 63, "%2.0f *C", eveningTemp);
-    widgets[index++].update(names[2], buf, itemState, "climate", type, itemName, itemType);
+    widgets[index++].update(names[2], buf, itemState, "" /*"climate"*/, type, itemName, itemType);
 
     debug(F("updateSiteMap"), "Updated widgets");
 
     index = 0;
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
     index++;
 
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
     index++;
 
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
     index++;
 
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
     index++;
 
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
     index++;
 
-    if (widget == -1 || widget == index)
+    if (widget == -1 || widget == index || widget == 100)
     {
         widgets[index].draw(UPDATE_MODE_GC16);
     }
@@ -337,13 +341,31 @@ void updateSiteMap(int widget)
 }
 
 int forceRefresh = -1;
+bool clearSleepCause = true;
 
 // Loop
 void loop()
 {
-    if (loopIndex % 1000)
+    if (loopIndex % 100 == 0)
     {
-        Serial.printf("Loop %i\n", loopIndex++);
+        Serial.printf("Loop %i\n", loopIndex);
+    }
+    loopIndex++;
+
+    // Light sleep only, or no sleep at all
+    if (M5.BtnP.wasPressed())
+    {
+        Serial.printf("Power button pressed\n");
+        forceRefresh = 100;
+        msg = "PowerBtn";
+    }
+
+    if (!clearSleepCause && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
+    {
+        Serial.printf("Wakeup from light sleep - power button\n");
+        forceRefresh = 100;
+        msg = "WakeUp";
+        clearSleepCause = true;
     }
 
     // Check touch
@@ -363,6 +385,7 @@ void loop()
                     {
                         debug("loop", "Widget touched: " + String(i));
                         forceRefresh = i;
+                        msg = "Touch" + String(i);
                     }
             }
         }
@@ -370,7 +393,7 @@ void loop()
     }
 
     currentSysInfoMillis = millis();
-    if ((currentSysInfoMillis - previousSysInfoMillis) > 10000)
+    if (forceRefresh != -1 || (currentSysInfoMillis - previousSysInfoMillis) > 10000)
     {
         previousSysInfoMillis = currentSysInfoMillis;
         displaySysInfo();
@@ -388,4 +411,36 @@ void loop()
     }
 
     events(); // for ezTime
+
+    if (forceRefresh == -1 && (currentRefreshMillis - previousRefreshMillis) > SLEEP_INTERVAL * 1000)
+    {
+        if (DEEP_SLEEP == 1)
+        {
+            debug("Loop", "Going to deep sleep");
+            msg = "DSleep";
+            displaySysInfo();
+            esp_sleep_enable_ext0_wakeup(GPIO_NUM_38, LOW);
+            esp_sleep_enable_timer_wakeup(REFRESH_INTERVAL * 1000 * 1000);
+            // esp_sleep_enable_touchpad_wakeup();
+            delay(1000);
+            esp_deep_sleep(REFRESH_INTERVAL * 1000 * 1000);
+            clearSleepCause = false;
+        }
+        else
+        {
+            debug("Loop", "Going to light sleep");
+            msg = "Sleep";
+            displaySysInfo();
+
+            esp_sleep_enable_ext0_wakeup(GPIO_NUM_38, LOW);
+            // esp_sleep_enable_touchpad_wakeup();
+            esp_sleep_enable_gpio_wakeup();
+            esp_sleep_enable_timer_wakeup(REFRESH_INTERVAL * 1000 * 1000);
+            delay(1000);
+            esp_light_sleep_start();
+            clearSleepCause = false;
+        }
+    }
+
+    delay(1000);
 }
