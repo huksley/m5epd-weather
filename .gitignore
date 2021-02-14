@@ -37,3 +37,8 @@
 # Settings (including Wifi)
 src/defs.h
 samples
+
+# Etc
+.DS_Store
+tools/littlefs/mklittlefs
+old
