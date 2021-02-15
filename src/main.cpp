@@ -37,6 +37,8 @@ int currentRefreshMillis;
 
 uint16_t _last_pos_x = 0xFFFF, _last_pos_y = 0xFFFF;
 
+String msg("---");
+
 Timezone openhabTZ;
 
 /* Reminders
@@ -63,6 +65,8 @@ bool fetch(String &url, String &response)
     {
         Serial.println(ERR_WIFI_NOT_CONNECTED);
         response = String(ERR_WIFI_NOT_CONNECTED);
+        msg = "WifiOff";
+        WiFi.begin(WIFI_SSID, WIFI_PSK);
         return false;
     }
     http.useHTTP10(true);
@@ -92,8 +96,6 @@ void setTimeZone() // Gets timezone from OpenHAB
     debug("setTimeZone", "OpenHAB timezone= " + timezone);
     openhabTZ.setLocation(timezone);
 }
-
-String msg("---");
 
 void displaySysInfo()
 {
@@ -352,7 +354,6 @@ void loop()
     }
     loopIndex++;
 
-    // Light sleep only, or no sleep at all
     if (M5.BtnP.wasPressed())
     {
         Serial.printf("Power button pressed\n");
@@ -360,11 +361,12 @@ void loop()
         msg = "PowerBtn";
     }
 
+    // Light sleep only
     if (!clearSleepCause && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
     {
         Serial.printf("Wakeup from light sleep - power button\n");
         forceRefresh = 100;
-        msg = "WakeUp";
+        msg = "WakeButton";
         clearSleepCause = true;
     }
 
@@ -393,7 +395,7 @@ void loop()
     }
 
     currentSysInfoMillis = millis();
-    if (forceRefresh != -1 || (currentSysInfoMillis - previousSysInfoMillis) > 10000)
+    if (currentSysInfoMillis - previousSysInfoMillis > 10000)
     {
         previousSysInfoMillis = currentSysInfoMillis;
         displaySysInfo();
@@ -412,7 +414,7 @@ void loop()
 
     events(); // for ezTime
 
-    if (forceRefresh == -1 && (currentRefreshMillis - previousRefreshMillis) > SLEEP_INTERVAL * 1000)
+    if (forceRefresh == -1 && (currentRefreshMillis - previousRefreshMillis) > SLEEP_TIMEOUT * 1000)
     {
         if (DEEP_SLEEP == 1)
         {
@@ -420,10 +422,10 @@ void loop()
             msg = "DSleep";
             displaySysInfo();
             esp_sleep_enable_ext0_wakeup(GPIO_NUM_38, LOW);
-            esp_sleep_enable_timer_wakeup(REFRESH_INTERVAL * 1000 * 1000);
+            esp_sleep_enable_timer_wakeup(SLEEP_INTERVAL * 1000 * 1000);
             // esp_sleep_enable_touchpad_wakeup();
             delay(1000);
-            esp_deep_sleep(REFRESH_INTERVAL * 1000 * 1000);
+            esp_deep_sleep(SLEEP_INTERVAL * 1000 * 1000);
             clearSleepCause = false;
         }
         else
@@ -435,7 +437,7 @@ void loop()
             esp_sleep_enable_ext0_wakeup(GPIO_NUM_38, LOW);
             // esp_sleep_enable_touchpad_wakeup();
             esp_sleep_enable_gpio_wakeup();
-            esp_sleep_enable_timer_wakeup(REFRESH_INTERVAL * 1000 * 1000);
+            esp_sleep_enable_timer_wakeup(SLEEP_INTERVAL * 1000 * 1000);
             delay(1000);
             esp_light_sleep_start();
             clearSleepCause = false;
